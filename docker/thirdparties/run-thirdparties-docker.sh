@@ -369,4 +369,5 @@ if  [[ "${RUN_TRINO}" -eq 1 ]]; then
         sleep 20s
         # execute create table sql
         docker exec -it ${TRINO_CONTAINER_ID} /bin/bash -c 'trino -f /scripts/create_trino_table.sql'
+    fi
 fi
