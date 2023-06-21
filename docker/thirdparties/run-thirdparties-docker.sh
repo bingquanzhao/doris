@@ -37,7 +37,7 @@ Usage: $0 <options>
      --stop             stop the specified components
 
   All valid components:
-    mysql,pg,oracle,sqlserver,clickhouse,es,hive,iceberg,hudi
+    mysql,pg,oracle,sqlserver,clickhouse,es,hive,iceberg,hudi,trino
   "
     exit 1
 }
@@ -92,7 +92,7 @@ else
     done
     if [[ "${COMPONENTS}"x == ""x ]]; then
         if [[ "${STOP}" -eq 1 ]]; then
-            COMPONENTS="mysql,pg,oracle,sqlserver,clickhouse,hive,iceberg,hudi"
+            COMPONENTS="mysql,pg,oracle,sqlserver,clickhouse,hive,iceberg,hudi,trino"
         fi
     fi
 fi
@@ -311,61 +311,62 @@ if  [[ "${RUN_TRINO}" -eq 1 ]]; then
 
     bash "${trino_docker}"/gen_env.sh
     sudo docker compose -f "${trino_docker}"/trino_hive.yaml --env-file "${trino_docker}"/trino_hive.env down
-    sudo sed -i "/${NAMENODE_CONTAINER_ID}/d" /etc/hosts
-    sudo docker compose -f "${trino_docker}"/trino_hive.yaml --env-file "${trino_docker}"/trino_hive.env up --build --remove-orphans -d
-    sudo echo "127.0.0.1 ${NAMENODE_CONTAINER_ID}" >> /etc/hosts
-    sleep 20s
-    hive_metastore_ip=$(docker inspect --format='{{range .NetworkSettings.Networks}}{{.IPAddress}}{{end}}' ${HIVE_METASTORE_CONTAINER_ID})
+    if [[ "${STOP}" -ne 1 ]]; then
+        sudo sed -i "/${NAMENODE_CONTAINER_ID}/d" /etc/hosts
+        sudo docker compose -f "${trino_docker}"/trino_hive.yaml --env-file "${trino_docker}"/trino_hive.env up --build --remove-orphans -d
+        sudo echo "127.0.0.1 ${NAMENODE_CONTAINER_ID}" >> /etc/hosts
+        sleep 20s
+        hive_metastore_ip=$(docker inspect --format='{{range .NetworkSettings.Networks}}{{.IPAddress}}{{end}}' ${HIVE_METASTORE_CONTAINER_ID})
 
-    if [ -z "$hive_metastore_ip" ]; then
-        echo "Failed to get Hive Metastore IP address" >&2
-        exit 1
-    else
-      echo "Hive Metastore IP address is: $hive_metastore_ip"
-    fi
-
-    sed -i "s/metastore_ip/${hive_metastore_ip}/g" "${trino_docker}"/hive.properties
-    docker cp "${trino_docker}"/hive.properties "${CONTAINER_UID}trino":/etc/trino/catalog/
-
-    # trino load hive catalog need restart server
-    max_retries=3
-    sleep_interval=3s
-
-    function control_container() {
-        operation=$1
-        expected_status=$2
-        retries=0
-
-        while [ $retries -lt $max_retries ]
-        do
-            status=$(docker inspect --format '{{.State.Running}}' ${TRINO_CONTAINER_ID})
-            if [ "${status}" == "${expected_status}" ]; then
-                echo "Container ${TRINO_CONTAINER_ID} has ${operation}ed successfully."
-                break
-            else
-                echo "Waiting for container ${TRINO_CONTAINER_ID} to ${operation}..."
-                sleep $sleep_interval
-                ((retries++))
-            fi
-        done
-
-        if [ $retries -eq $max_retries ]; then
-            echo "${operation^} operation failed to complete after $max_retries attempts."
+        if [ -z "$hive_metastore_ip" ]; then
+            echo "Failed to get Hive Metastore IP address" >&2
             exit 1
+        else
+          echo "Hive Metastore IP address is: $hive_metastore_ip"
         fi
-    }
-    # Stop the container
-    docker stop ${TRINO_CONTAINER_ID}
-    sleep $sleep_interval
-    control_container "stop" "false"
 
-    # Start the container
-    docker start ${TRINO_CONTAINER_ID}
-    sleep $sleep_interval
-    control_container "start" "true"
+        sed -i "s/metastore_ip/${hive_metastore_ip}/g" "${trino_docker}"/hive.properties
+        docker cp "${trino_docker}"/hive.properties "${CONTAINER_UID}trino":/etc/trino/catalog/
 
-    # waite trino init
-    sleep 20s
-    # execute create table sql
-    docker exec -it ${TRINO_CONTAINER_ID} /bin/bash -c 'trino -f /scripts/create_trino_table.sql'
+        # trino load hive catalog need restart server
+        max_retries=3
+        sleep_interval=3s
+
+        function control_container() {
+            operation=$1
+            expected_status=$2
+            retries=0
+
+            while [ $retries -lt $max_retries ]
+            do
+                status=$(docker inspect --format '{{.State.Running}}' ${TRINO_CONTAINER_ID})
+                if [ "${status}" == "${expected_status}" ]; then
+                    echo "Container ${TRINO_CONTAINER_ID} has ${operation}ed successfully."
+                    break
+                else
+                    echo "Waiting for container ${TRINO_CONTAINER_ID} to ${operation}..."
+                    sleep $sleep_interval
+                    ((retries++))
+                fi
+            done
+
+            if [ $retries -eq $max_retries ]; then
+                echo "${operation^} operation failed to complete after $max_retries attempts."
+                exit 1
+            fi
+        }
+        # Stop the container
+        docker stop ${TRINO_CONTAINER_ID}
+        sleep $sleep_interval
+        control_container "stop" "false"
+
+        # Start the container
+        docker start ${TRINO_CONTAINER_ID}
+        sleep $sleep_interval
+        control_container "start" "true"
+
+        # waite trino init
+        sleep 20s
+        # execute create table sql
+        docker exec -it ${TRINO_CONTAINER_ID} /bin/bash -c 'trino -f /scripts/create_trino_table.sql'
 fi
