@@ -24,7 +24,7 @@ networks:
 services:
 
   doris--trino:
-    image: trinodb/trino
+    image: trinodb/trino:418
     hostname: doris--trino
     container_name: doris--trino
     env_file:

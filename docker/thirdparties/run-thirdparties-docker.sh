@@ -297,7 +297,10 @@ fi
 
 if  [[ "${RUN_TRINO}" -eq 1 ]]; then
     # trino
-    trino_docker="${ROOT}"/trino
+    trino_docker="${ROOT}"/docker-compose/trino
+    TRINO_CONTAINER_ID="${CONTAINER_UID}trino"
+    NAMENODE_CONTAINER_ID="${CONTAINER_UID}namenode"
+    HIVE_METASTORE_CONTAINER_ID=${CONTAINER_UID}hive-metastore
     for file in trino_hive.yaml trino_hive.env gen_env.sh hive.properties
     do
         cp "${trino_docker}/$file.tpl" "${trino_docker}/$file"
@@ -307,9 +310,9 @@ if  [[ "${RUN_TRINO}" -eq 1 ]]; then
     done
 
     bash "${trino_docker}"/gen_env.sh
-    sudo docker compose -f "${docker_path}"/trino_hive.yaml --env-file "${docker_path}"/trino_hive.env down
+    sudo docker compose -f "${trino_docker}"/trino_hive.yaml --env-file "${trino_docker}"/trino_hive.env down
     sudo sed -i "/${NAMENODE_CONTAINER_ID}/d" /etc/hosts
-    sudo docker compose -f "${docker_path}"/trino_hive.yaml --env-file "${docker_path}"/trino_hive.env up --build --remove-orphans -d
+    sudo docker compose -f "${trino_docker}"/trino_hive.yaml --env-file "${trino_docker}"/trino_hive.env up --build --remove-orphans -d
     sudo echo "127.0.0.1 ${NAMENODE_CONTAINER_ID}" >> /etc/hosts
     sleep 20s
     hive_metastore_ip=$(docker inspect --format='{{range .NetworkSettings.Networks}}{{.IPAddress}}{{end}}' ${HIVE_METASTORE_CONTAINER_ID})
@@ -320,15 +323,9 @@ if  [[ "${RUN_TRINO}" -eq 1 ]]; then
     else
       echo "Hive Metastore IP address is: $hive_metastore_ip"
     fi
-    # test $hive_metastore_ip:port is available
-    if nc -zv "$hive_metastore_ip" 9083; then
-        echo "Hive Metastore is available"
-    else
-        echo "Failed to connect to Hive Metastore at $hive_metastore_ip:9083" >&2
-        exit 1
-    fi
-    sed -i "s/metastore_ip/${hive_metastore_ip}/g" "${docker_path}"/hive.properties
-    docker cp "${docker_path}"/hive.properties "${CONTAINER_UID}trino":/etc/trino/catalog/
+
+    sed -i "s/metastore_ip/${hive_metastore_ip}/g" "${trino_docker}"/hive.properties
+    docker cp "${trino_docker}"/hive.properties "${CONTAINER_UID}trino":/etc/trino/catalog/
 
     # trino load hive catalog need restart server
     max_retries=3
